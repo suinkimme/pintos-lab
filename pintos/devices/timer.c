@@ -17,6 +17,7 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
+static struct list sleep_list; 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
@@ -36,6 +37,8 @@ void
 timer_init (void) {
 	/* 8254 input frequency divided by TIMER_FREQ, rounded to
 	   nearest. */
+	
+	list_init(&sleep_list); //sleep_list 초기화
 	uint16_t count = (1193180 + TIMER_FREQ / 2) / TIMER_FREQ;
 
 	outb (0x43, 0x34);    /* CW: counter 0, LSB then MSB, mode 2, binary. */
@@ -70,33 +73,66 @@ timer_calibrate (void) {
 	printf ("%'"PRIu64" loops/s.\n", (uint64_t) loops_per_tick * TIMER_FREQ);
 }
 
-/* Returns the number of timer ticks since the OS booted. */
-int64_t
-timer_ticks (void) {
-	enum intr_level old_level = intr_disable ();
+/* OS가 부팅된 이후로 경과한 timer tick의 수를 반환한다. */
+int64_t timer_ticks(void)
+{
+	enum intr_level old_level = intr_disable(); 
 	int64_t t = ticks;
-	intr_set_level (old_level);
-	barrier ();
+	intr_set_level(old_level);
+	barrier();
 	return t;
 }
 
-/* Returns the number of timer ticks elapsed since THEN, which
-   should be a value once returned by timer_ticks(). */
-int64_t
-timer_elapsed (int64_t then) {
-	return timer_ticks () - then;
+/* 지정된 tick이후로 얼마나 많은 tick이 흘렀는지 반환 */
+
+int64_t timer_elapsed(int64_t then)
+{
+	return timer_ticks() - then;
 }
 
-/* Suspends execution for approximately TICKS timer ticks. */
-void
-timer_sleep (int64_t ticks) {
-	int64_t start = timer_ticks ();
+//sleep_list안에 있는 쓰레들을 비교해서 작으면 true, 크면 flase반환
+//정렬하기 위해서
+bool wakeup_tick_less(struct thread *t1, struct thread *t2, void *aux)
+{
+	if (t1->wakeup_tick < t2->wakeup_tick)
+		return true;
 
-	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	else
+		return false;
+
 }
 
+void wakeup(int64_t current_ticks) {
+	struct list_elem *current = list_begin(&sleep_list);
+	while (current != list_end(&sleep_list)) {
+		struct thread *t = list_entry(current, struct thread, elem);
+		if (t->wakeup_tick <= current_ticks) {
+			current = list_remove(current);
+			thread_unblock(t);
+    } else {
+			current = list_next(current);
+		}
+	}
+}
+
+/* 약 TICKS만큼의 타이머 틱 동안 실행을 일시 중지합니다. */
+void timer_sleep(int64_t ticks) 
+{
+	if (ticks <= 0) return;
+
+	int64_t start = timer_ticks();
+
+	ASSERT(intr_get_level() == INTR_ON);
+
+	while (timer_elapsed(start) < ticks) {
+		enum intr_level old_level = intr_disable();
+		struct thread *t_current = thread_current();
+		t_current->wakeup_tick = ticks;
+		list_push_back(&sleep_list, &t_current->elem);
+		thread_block();
+		intr_set_level(old_level);
+	}
+}
 /* Suspends execution for approximately MS milliseconds. */
 void
 timer_msleep (int64_t ms) {
@@ -126,6 +162,7 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+	wakeup(ticks);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
