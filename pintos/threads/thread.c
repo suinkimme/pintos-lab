@@ -79,6 +79,20 @@ static tid_t allocate_tid (void);
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
+void thread_maybe_yield (void) 
+{
+	enum intr_level old_level = intr_disable ();
+
+	if (!list_empty (&ready_list) && thread_current ()->priority < list_entry (list_front (&ready_list), struct thread, elem)->priority) {
+		if (intr_context())
+			intr_yield_on_return();
+        else
+			thread_yield();
+	}
+
+	intr_set_level (old_level);
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -217,7 +231,7 @@ thread_create (const char *name, int priority,
 	struct thread *t_current = thread_current();
 
 	if(t_current ->priority < priority){
-		thread_yield();
+		thread_maybe_yield();
 	}
 
 	return tid;
@@ -342,7 +356,7 @@ void thread_yield(void)
 void
 thread_set_priority (int new_priority) {
     thread_current()->priority = new_priority;
-	thread_yield();
+	thread_maybe_yield();
 	// curr->priority = new_priority;
 	
 	// if(!list_empty(&ready_list)){ //비어있지 않다면
@@ -459,7 +473,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 
 	//5. priority donation을 위한 필드 초기화
 	list_init(&t->donations); //나에게 우선순위를 기부한 스레드들의 리스트 초기화
-	t->wait_on_lock = NULL; //현재 기다리고 있는 락이 없으므로 NULL초기화
+	t->waiting_lock = NULL; //현재 기다리고 있는 락이 없으므로 NULL초기화
 	//6. 스택 오버플로우 감지용 매직 넘버 설정
 	t->magic = THREAD_MAGIC;
 }

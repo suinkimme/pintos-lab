@@ -96,7 +96,8 @@ struct thread {
 
 	int original_priority;
 	struct list donations;
-	struct lock *wait_on_lock;
+	struct list_elem donation_elem; // 기부자로 들어갈때 쓰는 연결점
+	struct lock *waiting_lock;
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
