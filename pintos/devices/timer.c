@@ -90,49 +90,21 @@ int64_t timer_elapsed(int64_t then)
 	return timer_ticks() - then;
 }
 
-//sleep_list안에 있는 쓰레들을 비교해서 작으면 true, 크면 flase반환
-//정렬하기 위해서
-bool wakeup_tick_less(struct thread *t1, struct thread *t2, void *aux)
-{
-	if (t1->wakeup_tick < t2->wakeup_tick)
-		return true;
-
-	else
-		return false;
-
-}
-
-void wakeup(int64_t current_ticks) {
-	struct list_elem *current = list_begin(&sleep_list);
-	while (current != list_end(&sleep_list)) {
-		struct thread *t = list_entry(current, struct thread, elem);
-		if (t->wakeup_tick <= current_ticks) {
-			current = list_remove(current);
-			thread_unblock(t);
-    } else {
-			current = list_next(current);
-		}
-	}
-}
-
-/* 약 TICKS만큼의 타이머 틱 동안 실행을 일시 중지합니다. */
+/// @brief 현재 스레드를 지정한 틱 수만큼 잠들게 함 (busy wait 대신 블록 처리)
+/// @param ticks 대기할 틱 수
 void timer_sleep(int64_t ticks) 
 {
-	if (ticks <= 0) return;
-
-	int64_t start = timer_ticks();
+	int64_t start = timer_ticks(); // timer_ticks(): 현재 틱의 값을 반환
 
 	ASSERT(intr_get_level() == INTR_ON);
 
-	while (timer_elapsed(start) < ticks) {
-		enum intr_level old_level = intr_disable();
-		struct thread *t_current = thread_current();
-		t_current->wakeup_tick = ticks;
-		list_push_back(&sleep_list, &t_current->elem);
-		thread_block();
-		intr_set_level(old_level);
-	}
+	// timer_elapsed(): 시작 이후 몇 개의 틱이 지나갔는지 반환
+	// 지정한 틱 수가 지나기 전까지 반복
+	while (timer_elapsed(start) < ticks) 
+		//thread_yield(); //thread_yield(): CPU 생성하고 ready_list에 스레드를 삽입
+		thread_sleep(start + ticks); // busy waiting 대신 스레드를 블록 상태로 전환하여 CPU 낭비 방지
 }
+
 /* Suspends execution for approximately MS milliseconds. */
 void
 timer_msleep (int64_t ms) {
@@ -158,11 +130,12 @@ timer_print_stats (void) {
 }
 
 /* Timer interrupt handler. */
-static void
-timer_interrupt (struct intr_frame *args UNUSED) {
+static void timer_interrupt (struct intr_frame *args UNUSED)
+{
 	ticks++;
 	thread_tick ();
-	wakeup(ticks);
+
+	thread_awake(ticks);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
