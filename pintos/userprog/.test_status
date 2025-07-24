@@ -12,8 +12,11 @@ alarm-priority PASS
 args-none FAIL
 priority-fifo PASS
 priority-sema PASS
+halt FAIL
 alarm-zero PASS
 priority-change PASS
 alarm-negative PASS
+exit FAIL
 priority-donate-sema PASS
+wait-simple FAIL
 alarm-multiple PASS

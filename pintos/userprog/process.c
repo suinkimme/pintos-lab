@@ -160,20 +160,33 @@ error:
 
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
+// 스레드가 실행될 때 process_exec()도 실행함 (initd)
 int
 process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
 
+	// 문자열 자르기
+	int argc = 0;
+	char *token, *save_ptr, argv[32];
+	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL;) {
+		token = strtok_r(NULL, " ", &save_ptr);
+		argv[argc++] = token;
+	}
+	
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
+	// intr_frame -> CPU 레지스터 상태를 저장해두는 구조체
 	struct intr_frame _if;
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
+	argument_stack(argc, argv, &_if.rsp);
 
 	/* We first kill the current context */
+	// 현재 사용자 프로세스의 페이지 테이블 전체를 제거함
+	// 그 안에 스택 영역도 포함되어 있기 때문에, 이 함수가 실행되면 사용자 스택 메모리도 완전히 사라진다.
 	process_cleanup ();
 
 	/* And then load the binary */
@@ -187,6 +200,37 @@ process_exec (void *f_name) {
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
+}
+
+void argument_stack(int argc, char *argv[], uintptr_t *rsp) {
+	char *arg_addr[32];
+
+	for (int i = argc - 1; i >= 0; i--) {
+		size_t len = strlen(argv[i]) + 1;
+		*rsp -= len;
+		memcpy((void *)*rsp, argv[i], len);
+		arg_addr[i] = (char *)*rsp;
+	}
+
+	*rsp = (uint64_t)((*rsp) & ~0x7);
+
+	*rsp -= 8;
+	*(uint64_t *)(*rsp) = 0;
+
+	for (int i = argc - 1; i >= 0; i--) {
+		*rsp -= 8;
+		*(uint64_t *)(*rsp) = (uint64_t)arg_addr[i];
+	}
+
+	uint64_t argv_ptr = *rsp;
+	*rsp -= 8;
+	*(uint64_t *)(*rsp) = argv_ptr;
+
+	*rsp -= 8;
+	*(uint64_t *)(*rsp) = argc;
+
+	*rsp -= 8;
+	*(uint64_t *)(*rsp) = 0;
 }
 
 
