@@ -71,6 +71,23 @@ initd (void *f_name) {
 	NOT_REACHED ();
 }
 
+// 자식 리스트에서 원하는 프로세스를 검색하는 함수
+struct thread *get_child_process(int pid)
+{
+    // 자식 리스트에 접근하여 프로세스 디스크립터 검색 
+    struct thread *cur = thread_current();
+    struct list *child_list = &cur->child_list;
+    for (struct list_elem *e = list_begin(child_list); e != list_end(child_list); e = list_next(e))
+    {
+        struct thread *t = list_entry(e, struct thread, child_elem);
+        // 해당 pid가 존재하면 프로세스 디스크립터 반환 
+        if (t->tid == pid)
+            return t;
+    }
+    // 리스트에 존재하지 않으면 NULL 리턴 
+    return NULL;
+}
+
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
 tid_t
@@ -158,64 +175,143 @@ error:
 	thread_exit ();
 }
 
-/* Switch the current execution context to the f_name.
- * Returns -1 on fail. */
-int
-process_exec (void *f_name) {
+int process_exec(void *f_name) 
+{
 	char *file_name = f_name;
 	bool success;
 
-	/* We cannot use the intr_frame in the thread structure.
-	 * This is because when current thread rescheduled,
-	 * it stores the execution information to the member. */
 	struct intr_frame _if;
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	/* We first kill the current context */
-	process_cleanup ();
+	process_cleanup();
 
-	/* And then load the binary */
-	success = load (file_name, &_if);
+	// 인자 파싱
+	char *token, *save_ptr;
+	char *arg_list[64];
+	int arg_cnt = 0;
 
-	/* If load failed, quit. */
-	palloc_free_page (file_name);
-	if (!success)
+	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+		arg_list[arg_cnt++] = token;
+
+	// 실행 파일 로드 (첫 번째 인자를 파일 이름으로 사용)
+	success = load(arg_list[0], &_if);
+	if (!success) {
+		palloc_free_page(file_name);
 		return -1;
+	}
 
-	/* Start switched process. */
-	do_iret (&_if);
-	NOT_REACHED ();
+	// 사용자 스택 초기화
+	void **rsp = &_if.rsp;
+	argument_stack(arg_list, arg_cnt, rsp);
+
+	// 레지스터 설정
+	_if.R.rdi = arg_cnt;
+	_if.R.rsi = (uint64_t)(*rsp + 8);  // argv 주소
+
+	// 메모리 해제
+	palloc_free_page(file_name);
+
+	// 디버깅용 스택 출력
+	hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+
+	do_iret(&_if);
+	NOT_REACHED();
 }
 
+void argument_stack(char **argv, int argc, void **rsp) {
+    char *arg_addr[64];  // 각 인자의 주소를 저장할 배열
 
-/* Waits for thread TID to die and returns its exit status.  If
- * it was terminated by the kernel (i.e. killed due to an
- * exception), returns -1.  If TID is invalid or if it was not a
- * child of the calling process, or if process_wait() has already
- * been successfully called for the given TID, returns -1
- * immediately, without waiting.
+    // 인자 문자열을 스택에 복사
+    for (int i = argc - 1; i >= 0; i--) {
+        size_t len = strlen(argv[i]) + 1;
+        *rsp -= len;
+        memcpy(*rsp, argv[i], len);
+        arg_addr[i] = *rsp;
+    }
+
+    // 8바이트 정렬
+    uintptr_t addr = (uintptr_t)*rsp;
+    int padding = addr % 8;
+    if (padding > 0) {
+        *rsp -= padding;
+        memset(*rsp, 0, padding);
+    }
+
+    // NULL 포인터 (argv[argc])
+    *rsp -= 8;
+    memset(*rsp, 0, 8);
+
+    // 각 인자 문자열의 주소 저장
+    for (int i = argc - 1; i >= 0; i--) {
+        *rsp -= 8;
+        memcpy(*rsp, &arg_addr[i], sizeof(char *));
+    }
+
+    // argv 시작 주소 (char **argv)
+    char **argv_addr = *rsp;
+    *rsp -= 8;
+    memcpy(*rsp, &argv_addr, sizeof(char **));
+
+    // 가짜 반환 주소
+    *rsp -= 8;
+    memset(*rsp, 0, 8);
+
+}
+
+/* 주어진 TID(스레드 ID)를 가진 스레드가 종료될 때까지 기다린 후,
+ * 그 종료 상태(exit status)를 반환합니다.
  *
- * This function will be implemented in problem 2-2.  For now, it
- * does nothing. */
+ * 만약 해당 스레드가 커널에 의해 종료되었을 경우
+ * (예: 예외 상황으로 강제 종료됨), -1을 반환합니다.
+ *
+ * TID가 유효하지 않거나, 호출한 프로세스의 자식이 아닌 경우,
+ * 혹은 이미 해당 TID에 대해 process_wait()가 성공적으로 호출된 적이 있다면
+ * 기다리지 않고 즉시 -1을 반환합니다.
+ *
+ * 이 함수는 2-2번 문제에서 구현해야 합니다.
+ * 현재는 아무 동작도 하지 않습니다. */
 int
 process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	return -1;
+    struct thread *child = get_child_process(child_tid);
+
+	// 1.자식이 아니면 -1을 반환한다.
+    if (child == NULL) 
+        return -1;
+
+    // 2. 자식이 종료될 때까지 대기한다. (process_exit에서 자식이 종료될 때 sema_up 해줄 것이다.)
+    sema_down(&child->wait_sema);
+
+    // 3. 자식이 종료됨을 알리는 `wait_sema` signal을 받으면 현재 스레드(부모)의 자식 리스트에서 제거한다.
+    list_remove(&child->child_elem);
+
+    // 4. 자식이 완전히 종료되고 스케줄링이 이어질 수 있도록 자식에게 signal을 보낸다.
+    sema_up(&child->exit_sema);
+
+	 // 5. 자식의 exit_status를 반환한다.
+    return child->exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
 	struct thread *curr = thread_current ();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	// 1) FDT의 모든 파일을 닫고 메모리를 반환한다.
+    for (int i = 2; i < FDT_COUNT_LIMIT; i++)
+        close(i);
+    palloc_free_page(curr->fdt);
+    file_close(curr->running); // 2) 현재 실행 중인 파일도 닫는다.
+
+    process_cleanup();
+
+    // 3) 자식이 종료될 때까지 대기하고 있는 부모에게 signal을 보낸다.
+    sema_up(&curr->wait_sema);
+	
+    // 4) 부모의 signal을 기다린다. 대기가 풀리고 나서 do_schedule(THREAD_DYING)이 이어져 다른 스레드가 실행된다.
+    sema_down(&curr->exit_sema);
+	 
 	process_cleanup ();
 }
 

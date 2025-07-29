@@ -7,6 +7,9 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "threads/palloc.h"
+#include "lib/user/syscall.h"
+#include "userprog/process.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -23,6 +26,8 @@ void syscall_handler (struct intr_frame *);
 #define MSR_STAR 0xc0000081         /* Segment selector msr */
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
+#define FDT_MAX_SIZE 64 //최대 파일 디스크립터 수
+#define FD_START 2 //0:stdin, 1:stdout
 
 void
 syscall_init (void) {
@@ -40,7 +45,213 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+int sys_number = f->R.rax;
+
+    // Argument 순서
+    // %rdi %rsi %rdx %r10 %r8 %r9
+    switch (sys_number) {
+        case SYS_HALT:
+            halt();
+            break;
+        case SYS_EXIT:
+            exit(f->R.rdi);
+            break;
+        case SYS_FORK:
+            f->R.rax = fork(f->R.rdi);
+            break;
+        case SYS_EXEC:
+            f->R.rax = exec(f->R.rdi);
+            break;
+        case SYS_WAIT:
+            f->R.rax = process_wait(f->R.rdi);
+            break;
+        case SYS_CREATE:
+            f->R.rax = create(f->R.rdi, f->R.rsi);
+            break;
+        case SYS_REMOVE:
+            f->R.rax = remove(f->R.rdi);
+            break;
+        case SYS_OPEN:
+            f->R.rax = open(f->R.rdi);
+            break;
+        case SYS_FILESIZE:
+            f->R.rax = filesize(f->R.rdi);
+            break;
+        case SYS_READ:
+            f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
+            break;
+        case SYS_WRITE:
+            f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
+            break;
+        case SYS_SEEK:
+            seek(f->R.rdi, f->R.rsi);
+            break;
+        case SYS_TELL:
+            f->R.rax = tell(f->R.rdi);
+            break;
+        case SYS_CLOSE:
+            close(f->R.rdi);
+            break;
+        default:
+            exit(-1);
+    }
 }
+
+bool check_address(void *addr)
+{
+    //커널주소인지 확인, pml4_get_page가 현재 프로세스 주소 공간에 매핑되어 있는지
+    if(addr == NULL || is_kernel_vaddr(addr) || !pml4_get_page(thread_current()->pml4, addr)){
+        return false;
+    }
+    return true;
+}
+
+void halt(void)
+{
+    power_off();
+}
+
+void exit (int status)
+{
+    struct thread *cur = thread_current();
+    cur->exit_status = status;
+    printf("%s: exit(%d)\n", cur->name, status);
+    sema_up(&cur->exit_sema); //부모가 wait일 수 있으니 세마포어로 깨워줌
+    thread_exit();
+}
+
+pid_t fork (const char *thread_name)
+{
+
+}
+
+int exec (const char *cmd_line)
+{
+    //1. 주소 유효성 검사
+    check_address(cmd_line); 
+
+    //2. 복사본 생성
+    char *cmd_line_copy;  
+
+    //3. 페이지 할당 
+    cmd_line_copy = palloc_get_page(0); 
+    if(cmd_line_copy == NULL) //할당 실패시
+        return -1;
+
+    //4. 커널 페이지에 명령어 복사
+    strlcpy(cmd_line_copy, cmd_line, PGSIZE);
+
+    //5. 프로세스 교체
+    int result = process_exec(cmd_line_copy);
+
+    //6. 실패시 종료
+    if (result = -1)
+        return -1;
+        
+    NOT_REACHED(); 
+
+    return -1; 
+}
+
+int wait (pid_t pid)
+{
+    return process_wait(pid);
+}
+
+bool create (const char *file, unsigned initial_size)
+ {  
+    check_address(file);
+
+    return filesys_create(file, initial_size);
+}
+
+bool remove (const char *file)
+{
+
+}
+
+int open (const char *file) {
+    // 1. 유저 주소 유효성 검사
+    check_address(file);
+
+    // 2. 파일 이름을 위한 커널 페이지 할당
+    char *file_name_copy = palloc_get_page(0);
+    if (file_name_copy == NULL)
+        return -1;
+
+    // 3. 파일 이름 복사
+    strlcpy(file_name_copy, file, PGSIZE);
+
+    // 4. 파일 열기
+    struct file *file_ptr = filesys_open(file_name_copy);
+
+    // 복사한 이름 페이지는 이제 필요 없으므로 해제
+    palloc_free_page(file_name_copy);
+
+    if (file_ptr == NULL)
+        return -1;
+
+    struct thread *curr = thread_current();
+
+    // 5. fd 테이블이 없다면 새로 할당
+    if (curr->fdt == NULL) {
+        curr->fdt = palloc_get_page(PAL_ZERO);
+        if (curr->fdt == NULL) {
+            file_close(file_ptr);
+            return -1;
+        }
+    }
+
+    // 6. fd 번호 찾기 (2번부터 시작)
+    for (int fd = 2; fd < FD_MAX; fd++) {
+        if (curr->fdt[fd] == NULL) {
+            curr->fdt[fd] = file_ptr;
+            return fd;
+        }
+    }
+
+    // 7. 빈 fd가 없으면 실패 처리
+    file_close(file_ptr);
+    return -1;
+}
+
+int filesize (int fd)
+{
+
+}
+
+int read (int fd, void *buffer, unsigned size)
+{
+
+}
+
+int write (int fd, const void *buffer, unsigned size)
+{
+    check_address(buffer); // 주소 유효성 검사
+
+
+    if (fd == 1)
+    {
+        putbuf(buffer, size);
+        return size;
+    }
+
+    return -1;
+}
+
+void seek (int fd, unsigned position)
+{
+
+}
+
+unsigned tell (int fd)
+{
+
+}
+
+void close (int fd)
+{
+
+}
+
+
