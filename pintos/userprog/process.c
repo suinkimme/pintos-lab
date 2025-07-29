@@ -184,6 +184,7 @@ int process_exec(void *f_name)
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
+	argument_stack(argc, argv, &_if.rsp);
 
 	process_cleanup();
 
@@ -257,7 +258,6 @@ void argument_stack(char **argv, int argc, void **rsp) {
     // 가짜 반환 주소
     *rsp -= 8;
     memset(*rsp, 0, 8);
-
 }
 
 /* 주어진 TID(스레드 ID)를 가진 스레드가 종료될 때까지 기다린 후,
