@@ -241,7 +241,12 @@ int write (int fd, const void *buffer, unsigned size)
 
 void seek (int fd, unsigned position)
 {
+    struct thread *curr = thread_current();
 
+    if (fd < 2 || fd >= FD_MAX) return;
+    if (curr->fdt[fd] == NULL) return; 
+
+    file_seek(curr->fdt[fd], position);
 }
 
 unsigned tell (int fd)
