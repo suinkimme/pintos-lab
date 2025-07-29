@@ -241,10 +241,10 @@ run_task (char **argv) {
 
 	printf ("Executing '%s':\n", task);
 #ifdef USERPROG
-	if (thread_tests){
+	if (thread_tests){ //스레드 테스트 실행
 		run_test (task);
 	} else {
-		process_wait (process_create_initd (task));
+		process_wait (process_create_initd (task)); //사용자 프로그램 실행
 	}
 #else
 	run_test (task);

@@ -162,17 +162,18 @@ thread_tick (void) {
 	struct thread *t = thread_current ();
 
 	/* Update statistics. */
-	if (t == idle_thread)
+	if (t == idle_thread) //아이들 스레드라면
 		idle_ticks++;
 #ifdef USERPROG
-	else if (t->pml4 != NULL)
+	else if (t->pml4 != NULL) //사용자프로그램은 고유한 pml4를 가지기 때문에 pml4가 NULL이 아니라면
+							  //사용자 스레드라고 판단
 		user_ticks++;
 #endif
-	else
+	else //커널스레드라면
 		kernel_ticks++;
 
-	/* Enforce preemption. */
-	if (++thread_ticks >= TIME_SLICE)
+	/* Enforce preemption.(선점 강제) */
+	if (++thread_ticks >= TIME_SLICE) //thread_ticks가 time_slice보다 같거나 커지면 강제로 양보
 		intr_yield_on_return ();
 }
 
@@ -500,6 +501,9 @@ static void init_thread (struct thread *t, const char *name, int priority)
 	t->magic = THREAD_MAGIC; // 스레드가 올바르게 초기화 되었는지 검증하기 위한 값 (스택 오버플로우 탐지용)
 #ifdef USERPROG
 	t->pml4 = NULL; // 명시적으로 NULL로 초기화
+
+    sema_init(&t->exit_sema, 0);
+    sema_init(&t->wait_sema, 0);
 #endif
 }
 
@@ -517,6 +521,7 @@ next_thread_to_run (void) {
 }
 
 /* Use iretq to launch the thread */
+//다음 스레드 상태 복원 + 점프
 void
 do_iret (struct intr_frame *tf) {
 	__asm __volatile(
@@ -556,8 +561,8 @@ do_iret (struct intr_frame *tf) {
    added at the end of the function. */
 static void
 thread_launch (struct thread *th) {
-	uint64_t tf_cur = (uint64_t) &running_thread ()->tf;
-	uint64_t tf = (uint64_t) &th->tf;
+	uint64_t tf_cur = (uint64_t) &running_thread ()->tf; //tf_cur는 현재 실행 중인 스레드의 상태를 저장할 위치
+	uint64_t tf = (uint64_t) &th->tf; //tf는 다음에 실행할 스레드의 상태를 복원할 위치
 	ASSERT (intr_get_level () == INTR_OFF);
 
 	/* The main switching logic.
@@ -567,9 +572,9 @@ thread_launch (struct thread *th) {
 	 * until switching is done. */
 	__asm __volatile (
 			/* Store registers that will be used. */
-			"push %%rax\n"
-			"push %%rbx\n"
-			"push %%rcx\n"
+			"push %%rax\n" //%rax는 현재 스레드의 레지스터 저장 공간 (intr_frame)
+			"push %%rbx\n" 
+			"push %%rcx\n" //%rcx는 do_iret() 호출 시 인자로 넘겨줄 struct intr_frame *tf
 			/* Fetch input once */
 			"movq %0, %%rax\n"
 			"movq %1, %%rcx\n"
@@ -607,7 +612,7 @@ thread_launch (struct thread *th) {
 			"mov %%rsp, 24(%%rax)\n" // rsp
 			"movw %%ss, 32(%%rax)\n"
 			"mov %%rcx, %%rdi\n"
-			"call do_iret\n"
+			"call do_iret\n" //iret를 통해 다음 스레드로 점프하거나 유저모드로 복귀
 			"out_iret:\n"
 			: : "g"(tf_cur), "g" (tf) : "memory"
 			);
