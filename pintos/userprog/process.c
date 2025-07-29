@@ -227,7 +227,7 @@ int process_wait(tid_t child_tid UNUSED)
 void process_exit(void)
 {
     struct thread *curr = thread_current();
-    printf("%s: exit(%d)\n", curr->name, curr->tf.R.rax);
+    // printf("%s: exit(%d)\n", curr->name, curr->tf.R.rax);
     /* TODO: Your code goes here.
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
