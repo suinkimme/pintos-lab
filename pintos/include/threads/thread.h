@@ -28,6 +28,9 @@ typedef int tid_t;
 #define PRI_MAX 63                      /* Highest priority. */
 #define FDPAGES 3
 #define FDCOUNT_LIMIT FDPAGES * (1 << 9) // 페이지 크기 4kb / 파일 포인터 8바이트 = 512
+#define FD_COUNT 64
+#define FDT_COUNT_LIMIT 64
+#define FD_MAX 64
 
 /* A kernel thread or user process.
  *
@@ -108,7 +111,21 @@ struct thread {
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
-	uint64_t *pml4;                     /* Page map level 4 */
+	uint64_t *pml4;                    /* Page map level 4 */
+	int exit_status; //자식의 종료 상태
+	
+	struct list child_list;
+	struct list_elem child_elem;      // 부모의 child_list에 들어갈 때 사용하는 연결 노드
+
+	struct file **fdt; // file descriptor table
+	int next_fd; // 다음에 사용할 file descriptor 번호
+
+	struct semaphore load_sema; // 프로세스 로드 완료를 기다리는 세마포어
+	struct semaphore exit_sema; //부모와 동기화용 세마포어
+	struct semaphore wait_sema; // 자식이 종료되면 부모가 기다릴 세마포어
+
+	struct file *running; // 현재 실행 중인 파일
+
  
 #endif
 #ifdef VM
@@ -129,7 +146,7 @@ struct child_status {
 	bool is_exited; // 자식이 종료됐는지 여부 (이 원소가)
 	struct semaphore wait_sema; // 부모가 자식을 기다릴 때 사용하는 세마포어
 	struct list_elem elem; // 부모의 child_list에 연결될 리스트 노드
-};
+	};
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
