@@ -1,4 +1,4 @@
-exec-bad-ptr FAIL
+exec-bad-ptr PASS
 sm-full FAIL
 rox-simple FAIL
 fork-multiple FAIL
@@ -54,7 +54,7 @@ exec-boundary FAIL
 close-normal PASS
 sm-create FAIL
 halt PASS
-write-bad-fd FAIL
+write-bad-fd PASS
 sm-random FAIL
 alarm-zero PASS
 open-boundary PASS
@@ -89,7 +89,7 @@ bad-jump2 FAIL
 open-missing PASS
 create-empty PASS
 args-single PASS
-write-stdin FAIL
+write-stdin PASS
 read-zero PASS
 bad-read2 FAIL
 syn-read FAIL
