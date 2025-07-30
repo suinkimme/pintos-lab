@@ -51,6 +51,8 @@ void close(int fd);
 #define FDT_MAX_SIZE 64 //최대 파일 디스크립터 수
 #define FD_START 2 //0:stdin, 1:stdout
 
+struct lock filesys_lock;
+
 void
 syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
@@ -62,6 +64,9 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+    // lock init
+    lock_init(&filesys_lock);
 }
 
 /* The main system call interface */
@@ -150,7 +155,9 @@ pid_t fork (const char *thread_name)
 int exec (const char *cmd_line)
 {
     //1. 주소 유효성 검사
-    check_address(cmd_line); 
+    if(!check_address(cmd_line)){
+        exit(-1);
+    }
 
     //2. 복사본 생성
     char *cmd_line_copy;  
@@ -182,29 +189,38 @@ int wait (pid_t pid)
 
 bool create (const char *file, unsigned initial_size)
  {  
-    if (file == NULL) {
+    bool success;
+    if (!check_address(file)) {
         exit(-1);
     }
-    
-    check_address(file);
+    // filesys.c 에 정의된 함수 사용
+    lock_acquire(&filesys_lock);
+    success = filesys_create(file, initial_size);
+    lock_release(&filesys_lock);
 
-    return filesys_create(file, initial_size);
+    return success;
 }
 
 bool remove (const char *file)
 {
-    check_address(file);
+    bool success;
+    if (!check_address(file)) {
+        exit(-1);
+    }
+    // filesys.c 에 정의된 함수 사용
+    lock_acquire(&filesys_lock);
+    success = filesys_remove(file);
+    lock_release(&filesys_lock);
 
-    return filesys_remove(file);
+    return success;
 }
 
 int open (const char *file) {
 
-    if (file == NULL) {
+    // 1. 유저 주소 유효성 검사
+    if(!check_address(file)){
         exit(-1);
     }
-    // 1. 유저 주소 유효성 검사
-    check_address(file);
 
     // 2. 파일 이름을 위한 커널 페이지 할당
     char *file_name_copy = palloc_get_page(0);
@@ -308,6 +324,7 @@ int write (int fd, const void *buffer, unsigned size)
 
     return file_write(f, buffer, size);
 }
+
 
 void seek (int fd, unsigned position)
 {
