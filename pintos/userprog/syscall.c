@@ -11,8 +11,28 @@
 #include "lib/user/syscall.h"
 #include "userprog/process.h"
 
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "threads/synch.h"
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
+bool check_address(void *addr);
+
+//syscall 함수선언
+void halt(void);
+void exit(int status);
+tid_t fork(const char *thread_name);
+int exec (const char *cmd_line);
+int wait(tid_t pid);
+int write(int fd, const void *buffer, unsigned size);
+bool create(const char *file, unsigned initial_size);
+bool remove(const char *file);
+int open(const char *file_name);
+int filesize(int fd);
+int read(int fd, void *buffer, unsigned size);
+void close(int fd);
 
 /* System call.
  *
@@ -160,6 +180,10 @@ int wait (pid_t pid)
 
 bool create (const char *file, unsigned initial_size)
  {  
+    if (file == NULL) {
+        exit(-1);
+    }
+    
     check_address(file);
 
     return filesys_create(file, initial_size);
@@ -167,10 +191,16 @@ bool create (const char *file, unsigned initial_size)
 
 bool remove (const char *file)
 {
+    check_address(file);
 
+    return filesys_remove(file);
 }
 
 int open (const char *file) {
+
+    if (file == NULL) {
+        exit(-1);
+    }
     // 1. 유저 주소 유효성 검사
     check_address(file);
 
@@ -217,8 +247,23 @@ int open (const char *file) {
 
 int filesize (int fd)
 {
+    struct thread *curr = thread_current();
 
-}
+     // 1. fd 유효성 검사
+    if (fd < 2 || fd >= FD_MAX){
+        exit(-1);
+    }
+
+    // 2. 파일 찾기
+    if (curr->fdt[fd] == NULL){
+        exit(-1);
+    }
+
+    struct file *file = curr->fdt[fd];
+
+    return file_length(file);
+
+}   
 
 int read (int fd, void *buffer, unsigned size)
 {
@@ -241,17 +286,57 @@ int write (int fd, const void *buffer, unsigned size)
 
 void seek (int fd, unsigned position)
 {
+    struct thread *curr = thread_current();
 
+    //1. fd 유효성 검사
+    if (fd < 2 || fd >= FD_MAX) return;
+
+    //2. 파일 찾기
+    if (curr->fdt[fd] == NULL) return; 
+    
+    //3. 파일 덮어씌우기
+    file_seek(curr->fdt[fd], position);
 }
 
 unsigned tell (int fd)
 {
+     struct thread *curr = thread_current();
 
+     // 1. fd 유효성 검사
+    if (fd < 2 || fd >= FD_MAX){
+        exit(-1);
+    }
+
+    // 2. 파일 찾기
+    if (curr->fdt[fd] == NULL){
+        exit(-1);
+    }
+
+    struct file *file = curr->fdt[fd];
+
+    return file_tell(file);
 }
 
 void close (int fd)
 {
+    struct thread *curr = thread_current();
 
+     // 1. fd 유효성 검사
+    if (fd < 2 || fd >= FD_MAX){
+        exit(-1);
+    }
+
+    // 2. 파일 찾기
+    if (curr->fdt[fd] == NULL){
+        exit(-1);
+    }
+
+    //3. 파일 닫기
+    file_close(curr->fdt[fd]); //curr->fdt[fd] 가 가리키는 파일을 free
+
+    //4. fdt슬롯 비우기
+    curr->fdt[fd] = NULL;
 }
+
 
 
