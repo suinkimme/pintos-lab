@@ -10,6 +10,7 @@
 #include "threads/palloc.h"
 #include "lib/user/syscall.h"
 #include "userprog/process.h"
+#include "lib/kernel/stdio.h"
 
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -267,12 +268,18 @@ int filesize (int fd)
 
 int read (int fd, void *buffer, unsigned size)
 {
+    check_address(buffer);
 
+    if (fd == 0) {
+
+    }
 }
 
 int write (int fd, const void *buffer, unsigned size)
 {
-    check_address(buffer); // 주소 유효성 검사
+    if (!check_address(buffer)) {
+        exit(-1);
+    }
 
 
     if (fd == 1)
@@ -281,7 +288,13 @@ int write (int fd, const void *buffer, unsigned size)
         return size;
     }
 
-    return -1;
+    struct thread *curr = thread_current();
+    struct file *f = curr->fdt[fd];
+    if (f == NULL) {
+        return -1;
+    }
+
+    return file_write(f, buffer, size);
 }
 
 void seek (int fd, unsigned position)
