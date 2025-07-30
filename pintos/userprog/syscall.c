@@ -174,7 +174,7 @@ int exec (const char *cmd_line)
     int result = process_exec(cmd_line_copy);
 
     //6. 실패시 종료
-    if (result = -1)
+    if (result == -1)
         return -1;
         
     NOT_REACHED(); 
@@ -289,6 +289,15 @@ int read (int fd, void *buffer, unsigned size)
         exit(-1);
     }
 
+    if (fd == 1){
+        return -1;
+    }
+
+    int byte_size = 0;
+
+    if (fd >= FD_MAX || fd < 0){
+        exit(-1);
+    }
 
     if (fd == 0) {
         return input_getc();
@@ -300,7 +309,12 @@ int read (int fd, void *buffer, unsigned size)
         return -1;
     }
 
-    return file_read(f, buffer, size);
+    lock_acquire(&filesys_lock);
+    byte_size =  file_read(f, buffer, size);
+    lock_release(&filesys_lock);
+
+    return byte_size;
+
 }
 
 int write (int fd, const void *buffer, unsigned size)
@@ -308,8 +322,7 @@ int write (int fd, const void *buffer, unsigned size)
     if (!check_address(buffer)) {
         exit(-1);
     }
-
-
+    
     if (fd == 1)
     {
         putbuf(buffer, size);
@@ -379,6 +392,3 @@ void close (int fd)
     //4. fdt슬롯 비우기
     curr->fdt[fd] = NULL;
 }
-
-
-
