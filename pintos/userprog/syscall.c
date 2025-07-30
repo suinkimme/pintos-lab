@@ -174,7 +174,7 @@ int exec (const char *cmd_line)
     int result = process_exec(cmd_line_copy);
 
     //6. 실패시 종료
-    if (result = -1)
+    if (result == -1)
         return -1;
         
     NOT_REACHED(); 
@@ -305,24 +305,40 @@ int read (int fd, void *buffer, unsigned size)
 
 int write (int fd, const void *buffer, unsigned size)
 {
-    if (!check_address(buffer)) {
+    if (!check_address((void *)buffer)) {
         exit(-1);
     }
 
+    for (unsigned i = 0; i < size; i++) {
+        if (!check_address((uint8_t *)buffer + i)) {
+            exit(-1);
+        }
+    }
 
-    if (fd == 1)
-    {
+    if (fd == 1) {
         putbuf(buffer, size);
         return size;
     }
 
+    if (fd <= 1 || fd >= FD_MAX) {
+        return -1;
+    }
+
     struct thread *curr = thread_current();
+    if (curr->fdt == NULL) {
+        return -1;
+    }
+
     struct file *f = curr->fdt[fd];
     if (f == NULL) {
         return -1;
     }
 
-    return file_write(f, buffer, size);
+    lock_acquire(&filesys_lock);
+    int bytes_written = file_write(f, buffer, size);
+    lock_release(&filesys_lock);
+
+    return bytes_written;
 }
 
 
