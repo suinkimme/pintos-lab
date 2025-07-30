@@ -11,6 +11,7 @@
 #include "lib/user/syscall.h"
 #include "userprog/process.h"
 #include "lib/kernel/stdio.h"
+#include "lib/kernel/hash.h"
 
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -268,11 +269,22 @@ int filesize (int fd)
 
 int read (int fd, void *buffer, unsigned size)
 {
-    check_address(buffer);
+    if (!check_address(buffer)) {
+        exit(-1);
+    }
+
 
     if (fd == 0) {
-
+        return input_getc();
     }
+
+    struct thread *curr = thread_current();
+    struct file *f = curr->fdt[fd];
+    if (f == NULL) {
+        return -1;
+    }
+
+    return file_read(f, buffer, size);
 }
 
 int write (int fd, const void *buffer, unsigned size)
