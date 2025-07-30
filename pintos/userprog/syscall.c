@@ -287,7 +287,7 @@ int write (int fd, const void *buffer, unsigned size)
 void seek (int fd, unsigned position)
 {
     struct thread *curr = thread_current();
-
+  
     //1. fd 유효성 검사
     if (fd < 2 || fd >= FD_MAX) return;
 
