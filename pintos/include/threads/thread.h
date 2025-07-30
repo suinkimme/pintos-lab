@@ -28,8 +28,6 @@ typedef int tid_t;
 #define PRI_MAX 63                      /* Highest priority. */
 #define FDPAGES 3
 #define FDCOUNT_LIMIT FDPAGES * (1 << 9) // 페이지 크기 4kb / 파일 포인터 8바이트 = 512
-#define FD_COUNT 64
-#define FDT_COUNT_LIMIT 64
 #define FD_MAX 64
 
 /* A kernel thread or user process.
